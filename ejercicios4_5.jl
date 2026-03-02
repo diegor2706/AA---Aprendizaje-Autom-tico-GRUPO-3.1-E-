@@ -1,479 +1,286 @@
-
-# Tened en cuenta que en este archivo todas las funciones tienen puesta la palabra reservada 'function' y 'end' al final
-# Según cómo las defináis, podrían tener que llevarlas o no
+using Statistics
+using Flux
+using Flux.Losses
+using Random
 
 # ----------------------------------------------------------------------------------------------
 # ------------------------------------- Ejercicio 2 --------------------------------------------
 # ----------------------------------------------------------------------------------------------
 
-using Statistics
-using Flux
-using Flux.Losses
-
-
+# 1. ONE HOT ENCODING
 function oneHotEncoding(feature::AbstractArray{<:Any,1}, classes::AbstractArray{<:Any,1})
     numClasses = length(classes)
-    numInstances = length(feature)
-
-    if numClasses == 0
-        error("No se han proporcionado clases para la codificación one-hot.")
-    elseif numClasses <= 2
-        binary_result = feature .== classes[1] # Codificación binaria
-        return reshape(binary_result, numInstances, 1) # Convertir a matriz de una columna
+    
+    if numClasses <= 2
+        return reshape(feature .== classes[1], :, 1)
     else
-        encoded = fill(false ,numInstances, numClasses) # Codificación one-hot
-        for (i, class) in enumerate(classes)
-            is_this_class = feature .== class   
-            encoded[is_this_class, i] .= true
+        oneHot = BitArray{2}(undef, length(feature), numClasses)
+        for i = 1:numClasses
+            oneHot[:, i] .= (feature .== classes[i])
         end
-        return encoded
+        return oneHot
     end
-end;
+end
 
-function oneHotEncoding(feature::AbstractArray{<:Any,1})
-    classes = sort(unique(feature))
-    return oneHotEncoding(feature, classes)
-end;
+oneHotEncoding(feature::AbstractArray{<:Any,1}) = oneHotEncoding(feature, unique(feature))
+oneHotEncoding(feature::AbstractArray{Bool,1}) = reshape(feature, :, 1)
 
-function oneHotEncoding(feature::AbstractArray{Bool,1})
-    return reshape(feature, length(feature), 1)
-end;
 
+# 2. NORMALIZACIÓN
 function calculateMinMaxNormalizationParameters(dataset::AbstractArray{<:Real,2})
-    min_vals = minimum(dataset, dims=1)
-    max_vals = maximum(dataset, dims=1)
-    return (min_vals, max_vals)
-end;
-
+    minValues = minimum(dataset, dims=1)
+    maxValues = maximum(dataset, dims=1)
+    return (minValues, maxValues)
+end
+    
 function calculateZeroMeanNormalizationParameters(dataset::AbstractArray{<:Real,2})
-    mean_vals = mean(dataset, dims=1)
-    std_vals = std(dataset, dims=1)
-    return (mean_vals, std_vals)
-end;
+    avgValues = mean(dataset, dims=1)
+    stdValues = std(dataset, dims=1)
+    return (avgValues, stdValues)
+end
 
 function normalizeMinMax!(dataset::AbstractArray{<:Real,2}, normalizationParameters::NTuple{2, AbstractArray{<:Real,2}})
-    min_vals, max_vals = normalizationParameters
-    ranges = max_vals .- min_vals
-
-    dataset .-= min_vals
-    dataset ./= ranges
-
-    #Columnas constantes a 0
-    dataset[:, vec(ranges .== 0)] .= 0.0
-
+    dataset .-= normalizationParameters[1]
+    dataset ./= (normalizationParameters[2] .- normalizationParameters[1])
+    dataset[:, vec(normalizationParameters[1] .== normalizationParameters[2])] .= 0
     return dataset
-end;
+end
 
 function normalizeMinMax!(dataset::AbstractArray{<:Real,2})
-    paramas = calculateMinMaxNormalizationParameters(dataset)
-    return normalizeMinMax!(dataset, paramas)
-end;
+    mins_maxs = calculateMinMaxNormalizationParameters(dataset)
+    return normalizeMinMax!(dataset, mins_maxs)
+end
 
 function normalizeMinMax(dataset::AbstractArray{<:Real,2}, normalizationParameters::NTuple{2, AbstractArray{<:Real,2}})
-    newDataset = copy(dataset)
-    normalizeMinMax!(newDataset, normalizationParameters)   
-    return newDataset
-end;
+    dataset2 = copy(dataset)
+    normalizeMinMax!(dataset2, normalizationParameters)
+    return dataset2
+end
 
-function normalizeMinMax(dataset::AbstractArray{<:Real,2})
-    newDataset = copy(dataset)
-    normalizeMinMax!(newDataset)
-    return newDataset
-end;
+function normalizeMinMax(dataset::AbstractArray{<:Real,2}) 
+    dataset2 = copy(dataset)
+    normalizeMinMax!(dataset2)
+    return dataset2
+end
 
 function normalizeZeroMean!(dataset::AbstractArray{<:Real,2}, normalizationParameters::NTuple{2, AbstractArray{<:Real,2}})
-    mean_vals, std_vals = normalizationParameters
-    dataset .-= mean_vals
-    dataset ./= std_vals
-
-    #Columnas constantes a 0
-    dataset[:, vec(std_vals .== 0)] .= 0.0
-
+    dataset .-= normalizationParameters[1]
+    dataset ./= normalizationParameters[2]
+    dataset[:, vec(normalizationParameters[2] .== 0)] .= 0
     return dataset
-end;
+end
 
 function normalizeZeroMean!(dataset::AbstractArray{<:Real,2})
-    paramas = calculateZeroMeanNormalizationParameters(dataset)
-    return normalizeZeroMean!(dataset, paramas)
-end;
+    avgs_stds = calculateZeroMeanNormalizationParameters(dataset)
+    return normalizeZeroMean!(dataset, avgs_stds)
+end
 
 function normalizeZeroMean(dataset::AbstractArray{<:Real,2}, normalizationParameters::NTuple{2, AbstractArray{<:Real,2}})
-    newDataset = copy(dataset)
-    normalizeZeroMean!(newDataset, normalizationParameters)   
-    return newDataset
-end;
+    dataset2 = copy(dataset)
+    normalizeZeroMean!(dataset2, normalizationParameters)
+    return dataset2
+end
 
 function normalizeZeroMean(dataset::AbstractArray{<:Real,2})
-    newDataset = copy(dataset)
-    normalizeZeroMean!(newDataset)
-    return newDataset
-end;
+    dataset2 = copy(dataset)
+    normalizeZeroMean!(dataset2)
+    return dataset2
+end
 
+
+# 3. accuracy y classifyOutputs
 function classifyOutputs(outputs::AbstractArray{<:Real,1}; threshold::Real=0.5)
     return outputs .>= threshold
-end;
+end
 
 function classifyOutputs(outputs::AbstractArray{<:Real,2}; threshold::Real=0.5)
-    numCols = size(outputs, 2)
-
-    # Caso binario
-    if numCols == 1
-        classifiedVector = classifyOutputs(outputs[:]; threshold=threshold)
-        return reshape(classifiedVector, :, 1)
+    if size(outputs, 2) == 1 
+        vector = classifyOutputs(outputs[:]; threshold=threshold)
+        return reshape(vector, :, 1)
+    else 
+        (_, indicesMaxEachInstance) = findmax(outputs, dims=2)
+        outputs_bool = falses(size(outputs))
+        outputs_bool[indicesMaxEachInstance] .= true 
+        return outputs_bool
     end
-
-    # Caso multiclase
-    # Indice de la clase con mayor valor
-    (_, maxIndices) = findmax(outputs, dims=2)
-
-    # Creamos matriz booleana del mismo tamaño
-    classified = fill(false,size(outputs))
-
-    # Ponemos a true el indice de la clase con mayor valor
-    classified[maxIndices] .= true
-
-    return classified
-end;
+end
 
 function accuracy(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1})
-    mean(outputs .== targets)
-end;
+    return mean(targets .== outputs)
+end
 
 function accuracy(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2})
-    numCols = size(outputs, 2)
-    # Solo 1 columna
-    if numCols == 1
-        return accuracy(outputs[:, 1], targets[:, 1])
+    num_cols_targets = size(targets, 2)
+    num_cols_outputs = size(outputs, 2)
+    @assert (num_cols_targets == num_cols_outputs) "las matrices no tienen el mismo numero de columnas"
+    
+    if num_cols_targets == 1
+        return accuracy(targets[:, 1], outputs[:, 1])
+    else
+        return mean(all(targets .== outputs, dims=2))
     end
-    # Multiclase
-    matches = eachrow(outputs) .== eachrow(targets)
-    return mean(matches)
-end;
+end
 
 function accuracy(outputs::AbstractArray{<:Real,1}, targets::AbstractArray{Bool,1}; threshold::Real=0.5)
-    classifiedOutputs = classifyOutputs(outputs; threshold=threshold)
-    return accuracy(classifiedOutputs, targets)
-end;
+    predicted_classes = outputs .>= threshold
+    return accuracy(predicted_classes, targets)
+end
 
 function accuracy(outputs::AbstractArray{<:Real,2}, targets::AbstractArray{Bool,2}; threshold::Real=0.5)
-    numCols = size(outputs, 2)
-
-    # Solo 1 columna
-    if numCols == 1
+    num_cols_targets = size(targets, 2)
+    num_cols_outputs = size(outputs, 2)
+    @assert (num_cols_targets == num_cols_outputs) "las matrices no tienen el mismo numero de columnas"
+    
+    if num_cols_targets == 1
         return accuracy(outputs[:, 1], targets[:, 1]; threshold=threshold)
     else
-        classifiedOutputs = classifyOutputs(outputs)
-        return accuracy(classifiedOutputs, targets)
+        predicted_classes = classifyOutputs(outputs; threshold=threshold)
+        return accuracy(predicted_classes, targets)    
     end
-end;
+end
 
-function buildClassANN(numInputs::Int, topology::AbstractArray{<:Int,1}, numOutputs::Int; transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)))
-    # Red Inicial Vacía
+
+# 4. CONSTRUCCIÓN DE LA RED
+function buildClassANN(numInputs::Int, topology::AbstractArray{<:Int,1}, numOutputs::Int;
+    transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)))
     ann = Chain()
-
-    # Numero entradas para la primera capa
     numInputsLayer = numInputs
-
-    # Capas ocultas
-    for (i, numNeurons) in enumerate(topology)
-        ann = Chain(ann..., Dense(numInputsLayer, numNeurons, transferFunctions[i]))
-        numInputsLayer = numNeurons
-    end
-
-    # Funcion de activacion de la capa de salida según numero de clases
-    if numOutputs == 1
-        # Para clasificación binaria
-        ann = Chain(ann..., Dense(numInputsLayer, numOutputs, σ))
-    else 
-        # Clasificacion multiclase: capa lineal y luego softmax
-        ann = Chain(ann..., Dense(numInputsLayer, numOutputs, identity), softmax)
-    end
-
-    return ann
-end;
-
-function trainClassANN(topology::AbstractArray{<:Int,1}, dataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}}; transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)), maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01)
-    inputs, targets = dataset
-
-    # Covertir entradas a Float32
-    inputs = Float32.(inputs)
-    # Covertir salidas a Float32
-    targets = Float32.(targets)
-
-    # Numero de neuronas de entrada y salida
-    numInputs = size(inputs, 2)
-    numOutputs = size(targets, 2)
-
-    # Construir la red
-    ann = buildClassANN(numInputs, topology, numOutputs; transferFunctions=transferFunctions)
-
-    function loss_function(model, x, y)
-        if numOutputs == 1
-            return Flux.Losses.binarycrossentropy(model(x), y)
-        else
-            return Flux.Losses.crossentropy(model(x), y)
-        end
-    end
-
-    # Optimizador
-    opt = Flux.setup(Adam(learningRate), ann)
-
-    # Vector para almacenar losses 
-    losses = Float32[]
-
-    # Evaluar loss ciclo 0
-    push!(losses, Float32(loss_function(ann, inputs', targets')))
-
-    # Entrenamiento
-    for epoch in 1:maxEpochs
-        # Entrena un ciclo
-        Flux.train!(loss_function, ann, [(inputs', targets')], opt)
-
-        # Evaluar loss actual 
-        current_loss = loss_function(ann, inputs', targets')
-        push!(losses, current_loss)
-
-        # Comprobamos criterios de parada
-        if current_loss <= minLoss 
-            break
-        end 
+    for i in eachindex(topology)
+        ann = Chain(ann..., Dense(numInputsLayer, topology[i], transferFunctions[i]))
+        numInputsLayer = topology[i]
     end 
-
-    return ann, losses
-end;
-
-function trainClassANN(topology::AbstractArray{<:Int,1}, (inputs, targets)::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}}; transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)), maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01) 
-    # Convertir vector  a matriz columna
-    targets_matrix = reshape(targets, :, 1)
-
-    # Llamamos a la version matriz 
-    return trainClassANN(topology, (inputs, targets_matrix); transferFunctions=transferFunctions, maxEpochs=maxEpochs, minLoss=minLoss, learningRate=learningRate)
-end;
-
+    if numOutputs > 2
+        ann = Chain(ann..., Dense(numInputsLayer, numOutputs, identity))
+        ann = Chain(ann..., softmax)
+    else
+        ann = Chain(ann..., Dense(numInputsLayer, 1, σ))
+    end
+    return ann 
+end
 
 # ----------------------------------------------------------------------------------------------
 # ------------------------------------- Ejercicio 3 --------------------------------------------
 # ----------------------------------------------------------------------------------------------
 
-using Random
-
+# 5. HOLD OUT
 function holdOut(N::Int, P::Real)
-    # Validar parametros
-    @assert 0.0 <= P <= 1.0 "P debe estar entre 0 y 1"
-
-    # Calcular número elementos para test
-    n_test = round(Int, N * P)
-
-    # Permutar aleatoriamente los indices
-    perm = randperm(N)
-
-    # Dividir indices en train y test
-    idx_test = perm[1:n_test]
-    idx_train = perm[n_test+1:end]
-
-    return idx_train, idx_test
-end;
+    indices = randperm(N)
+    num_train = round(Int, N * (1 - P))
+    training_indices = indices[1:num_train]
+    test_indices = indices[(num_train + 1):N]
+    return (training_indices, test_indices)
+end
 
 function holdOut(N::Int, Pval::Real, Ptest::Real)
-    # Validar parametros
-    @assert 0.0 <= Pval <= 1.0 "Pval debe estar entre 0 y 1"
-    @assert 0.0 <= Ptest <= 1.0 "Ptest debe estar entre 0 y 1"
-    @assert Pval + Ptest <= 1.0 "La suma de Pval y Ptest no puede ser mayor que 1"
-
-    # Primero separamos el conjunto de test
-    idx_train_val, idx_test = holdOut(N, Ptest)
-    
-    # Calcular Pval ajustado para el conjunto restante
-    n_train_val = length(idx_train_val)
-    n_val_target = round(Int, N * Pval)
-
-    if n_train_val > 0
-        Pval_adjusted = n_val_target / n_train_val
-        # Asegurar que Pval_adjusted no es mayor que 1
-        Pval_adjusted = min(Pval_adjusted, 1.0)
-    else 
-        Pval_adjusted = 0.0
-    end
-
-    # Separar train y validation del conjunto restante
-    idx_train, idx_val = holdOut(n_train_val, Pval_adjusted)
-
-    # Mapear indices de idx_train e idx_val al conjunto original
-    idx_train = idx_train_val[idx_train]
-    idx_val = idx_train_val[idx_val]
-
-    return idx_train, idx_val, idx_test
-end;
+    training_indices, remaining_indices = holdOut(N, Pval + Ptest)
+    val_indices, test_indices = holdOut(length(remaining_indices), Ptest / (Pval + Ptest))
+    val_indices = remaining_indices[val_indices]
+    test_indices = remaining_indices[test_indices]
+    return (training_indices, val_indices, test_indices)
+end
 
 function trainClassANN(topology::AbstractArray{<:Int,1},
     trainingDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}};
-    validationDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}}=(Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0,size(trainingDataset[2],2))),
-    testDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}}=(Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0,size(trainingDataset[2],2))),
+    validationDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}}=
+    (Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0,size(trainingDataset[2],2))),
+    testDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,2}}=
+    (Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0,size(trainingDataset[2],2))),
     transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)),
-    maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01, maxEpochsVal::Int=20)
+    maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01,
+    maxEpochsVal::Int=20)
     
-    # Extraer datos Entrenamiento
-    train_inputs, train_targets = trainingDataset
+    inputs = Float32.(trainingDataset[1])
+    targets = trainingDataset[2]
+
+    numInputs = size(inputs, 2)
+    numOutputs = size(targets, 2)
     
-    # Preparar datos validación y test
-    val_inputs, val_targets = validationDataset
-    test_inputs, test_targets = testDataset
+    rna = buildClassANN(numInputs, topology, numOutputs; transferFunctions=transferFunctions)
+    loss(m, x, y) = (size(y,1) == 1) ? Flux.binarycrossentropy(m(x),y) : Flux.crossentropy(m(x),y)
+    opt_state = Flux.setup(Adam(learningRate), rna)
+
+    training_loss = Float32[]
+    validation_loss = Float32[]
+    test_loss = Float32[]
+
+    best_rna = deepcopy(rna)
+    best_val_loss = Inf32
+    epochs_with_no_better_val_loss = 0
+
+    has_validation = !isempty(validationDataset[1])
+    has_test = !isempty(testDataset[1])
+
+    # Ciclo 0
+    push!(training_loss, loss(rna, inputs', targets'))
     
-    # Obtener dimensiones 
-    numInputs = size(train_inputs, 2)
-    numOutputs = size(train_targets, 2)
+    if has_validation
+        val_loss = loss(rna, Float32.(validationDataset[1])', validationDataset[2]')
+        push!(validation_loss, val_loss)
+        best_val_loss = val_loss
+    end
     
-    # Construir la red
-    ann = buildClassANN(numInputs, topology, numOutputs; transferFunctions=transferFunctions)
-    
-    # Definir función de pérdida
-    function loss_function(model, x, y)
-        if numOutputs == 1
-            return Flux.Losses.binarycrossentropy(model(x), y)
-        else
-            return Flux.Losses.crossentropy(model(x), y)
+    if has_test
+        push!(test_loss, loss(rna, Float32.(testDataset[1])', testDataset[2]'))
+    end
+
+    # Bucle
+    for i in 1:maxEpochs
+        Flux.train!(loss, rna, [(inputs', targets')], opt_state)
+        push!(training_loss, loss(rna, inputs', targets'))
+        
+        if has_test
+            push!(test_loss, loss(rna, Float32.(testDataset[1])', testDataset[2]'))
         end
-    end
-    
-    # Optimizador
-    opt_state = Flux.setup(Adam(learningRate), ann)
-    
-    # Vector para almacenar losses
-    train_losses = Float32[]
-    val_losses = Float32[]
-    test_losses = Float32[]
-    
-    # Preparar datos para flux 
-    train_inputs_t = Float32.(train_inputs)'
-    train_targets_t = Float32.(train_targets)'
-    
-    # Preparar datos de validación
-    has_validation = size(val_inputs, 1) > 0 && size(val_targets, 1) > 0
-    if has_validation
-        val_inputs_t = Float32.(val_inputs)'
-        val_targets_t = Float32.(val_targets)'
-    end
-    
-    # Preparar datos de test
-    has_test = size(test_inputs, 1) > 0 && size(test_targets, 1) > 0
-    if has_test
-        test_inputs_t = Float32.(test_inputs)'
-        test_targets_t = Float32.(test_targets)'
-    end
-    
-    # Calcular loss inicial
-    initial_train_loss = Float32(loss_function(ann, train_inputs_t, train_targets_t))
-    push!(train_losses, initial_train_loss)
-    
-    if has_validation
-        initial_val_loss = Float32(loss_function(ann, val_inputs_t, val_targets_t))
-        push!(val_losses, initial_val_loss)
-    end
-    
-    if has_test
-        initial_test_loss = Float32(loss_function(ann, test_inputs_t, test_targets_t))
-        push!(test_losses, initial_test_loss)
-    end
-    
-    # Variables para early stopping
-    if has_validation
-        best_val_loss = val_losses[1]
-        best_ann = deepcopy(ann)
-        epochs_without_improvement = 0
-    else
-        best_ann = nothing
-        epochs_without_improvement = 0
-    end
-    
-    # Bucle principal Entrenamiento
-    for epoch in 1:maxEpochs
-        # Entrena un ciclo con nueva API de Flux
-        Flux.train!(loss_function, ann, [(train_inputs_t, train_targets_t)], opt_state)
-        
-        # Evaluar loss actual en entrenamiento
-        current_train_loss = Float32(loss_function(ann, train_inputs_t, train_targets_t))
-        push!(train_losses, current_train_loss)
-        
-        # Evaluar loss actual en validación
+
         if has_validation
-            current_val_loss = Float32(loss_function(ann, val_inputs_t, val_targets_t))
-            push!(val_losses, current_val_loss)
+            val_loss = loss(rna, Float32.(validationDataset[1])', validationDataset[2]')
+            push!(validation_loss, val_loss)
             
-            # Comprobar mejora en validación para early stopping
-            if current_val_loss < best_val_loss
-                best_val_loss = current_val_loss
-                best_ann = deepcopy(ann)
-                epochs_without_improvement = 0
+            if val_loss < best_val_loss
+                best_rna = deepcopy(rna)
+                best_val_loss = val_loss
+                epochs_with_no_better_val_loss = 0
             else
-                epochs_without_improvement += 1
+                epochs_with_no_better_val_loss += 1
+            end
+            
+            if epochs_with_no_better_val_loss >= maxEpochsVal
+                break
             end
         end
         
-        # Evaluar loss actual en test
-        if has_test
-            current_test_loss = Float32(loss_function(ann, test_inputs_t, test_targets_t))
-            push!(test_losses, current_test_loss)
-        end
-        
-        # Comprobar criterio de parada por early stopping (después de evaluar test)
-        if has_validation && epochs_without_improvement >= maxEpochsVal
+        if training_loss[end] <= minLoss
             break
         end
-        
-        # Comprobar criterio de parada por loss mínimo alcanzado
-        if current_train_loss <= minLoss 
-            break
-        end 
     end
-
-    # Determinar qué modelo devolver
-    if has_validation
-        return best_ann, train_losses, val_losses, test_losses
-    else
-        return ann, train_losses, val_losses, test_losses
-    end
-end;
+    
+    final_rna = has_validation ? best_rna : rna
+    return final_rna, training_loss, validation_loss, test_loss
+end
 
 function trainClassANN(topology::AbstractArray{<:Int,1},
     trainingDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}};
-    validationDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}}=(Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0)),
-    testDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}}=(Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0)),
+    validationDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}}=
+    (Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0)),
+    testDataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{Bool,1}}=
+    (Array{eltype(trainingDataset[1]),2}(undef,0,size(trainingDataset[1],2)), falses(0)),
     transferFunctions::AbstractArray{<:Function,1}=fill(σ, length(topology)),
-    maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01, maxEpochsVal::Int=20)
+    maxEpochs::Int=1000, minLoss::Real=0.0, learningRate::Real=0.01,
+    maxEpochsVal::Int=20) 
     
-    # Convertir targets a matriz columna
-    train_inputs, train_targets = trainingDataset
-    train_targets_matrix = reshape(train_targets, :, 1)
+    training_matrix = reshape(trainingDataset[2], :, 1)
+    validation_matrix = reshape(validationDataset[2], :, 1)
+    test_matrix = reshape(testDataset[2], :, 1)
     
-    # Para validación
-    val_inputs, val_targets = validationDataset
-    if length(val_targets) > 0
-        val_targets_matrix = reshape(val_targets, :, 1)
-        new_validationDataset = (val_inputs, val_targets_matrix)
-    else
-        new_validationDataset = (Array{eltype(val_inputs),2}(undef,0,size(val_inputs,2)), falses(0,1))
-    end
-    
-    # Para test
-    test_inputs, test_targets = testDataset
-    if length(test_targets) > 0
-        test_targets_matrix = reshape(test_targets, :, 1)
-        new_testDataset = (test_inputs, test_targets_matrix)
-    else
-        new_testDataset = (Array{eltype(test_inputs),2}(undef,0,size(test_inputs,2)), falses(0,1))
-    end
-    
-    # Llamar a la versión matriz
-    return trainClassANN(topology, 
-        (train_inputs, train_targets_matrix); 
-        validationDataset=new_validationDataset, 
-        testDataset=new_testDataset, 
+    return trainClassANN(topology, (trainingDataset[1], training_matrix); 
+        validationDataset=(validationDataset[1], validation_matrix), 
+        testDataset=(testDataset[1], test_matrix), 
         transferFunctions=transferFunctions, 
         maxEpochs=maxEpochs, 
         minLoss=minLoss, 
         learningRate=learningRate, 
         maxEpochsVal=maxEpochsVal)
-end;
+end
 
 
 # ----------------------------------------------------------------------------------------------
@@ -668,7 +475,7 @@ function trainClassDoME(trainingDataset::Tuple{AbstractArray{<:Real,2}, Abstract
     
     #Control por si el modelo devuelve una constante
     if isa(testOutputs, Real)
-        testOutputs = repeat([testOutputs], size(test_in_f64, 1))
+        testOutputs = [testOutputs]
     end
 
     return Float64.(testOutputs)
@@ -725,8 +532,6 @@ function trainClassDoME(trainingDataset::Tuple{AbstractArray{<:Real,2}, Abstract
 
     return testOutputs
 end;
-
-
 
 
 # ----------------------------------------------------------------------------------------------
@@ -856,26 +661,3 @@ function ANNCrossValidation(topology::AbstractArray{<:Int,1},
     return (final_result..., global_conf_matrix)
             
 end;
-
-
-# ----------------------------------------------------------------------------------------------
-# ------------------------------------- Ejercicio 6 --------------------------------------------
-# ----------------------------------------------------------------------------------------------
-
-using MLJ
-using LIBSVM, MLJLIBSVMInterface
-using NearestNeighborModels, MLJDecisionTreeInterface
-
-SVMClassifier = MLJ.@load SVC pkg=LIBSVM verbosity=0
-kNNClassifier = MLJ.@load KNNClassifier pkg=NearestNeighborModels verbosity=0
-DTClassifier  = MLJ.@load DecisionTreeClassifier pkg=DecisionTree verbosity=0
-
-
-function modelCrossValidation(modelType::Symbol, modelHyperparameters::Dict, dataset::Tuple{AbstractArray{<:Real,2}, AbstractArray{<:Any,1}}, crossValidationIndices::Array{Int64,1})
-    #
-    # Codigo a desarrollar
-    #
-end;
-
-
-
