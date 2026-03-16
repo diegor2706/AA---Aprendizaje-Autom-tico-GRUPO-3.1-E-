@@ -693,16 +693,18 @@ function modelCrossValidation(modelType::Symbol, modelHyperparameters::Dict, dat
         # Extraemos la topología, que es obligatoria y posicional
         topology = get_hp("topology", [4, 3])
         
-        # Llamamos a la función respetando el orden y pasando los demás como keywords (;)
+        # Llamamos a la función respetando el orden y pasando los demás como keywords 
         return ANNCrossValidation(
             topology, 
             dataset, 
             crossValidationIndices;
-            numExecutions   = get_hp("numExecutions", 50),
-            maxEpochs       = get_hp("maxEpochs", 1000),
-            learningRate    = get_hp("learningRate", 0.01),
-            validationRatio = get_hp("validationRatio", 0.0),
-            maxEpochsVal    = get_hp("maxEpochsVal", 20)
+            numExecutions      = get_hp("numExecutions", 50),
+            maxEpochs          = get_hp("maxEpochs", 1000),
+            learningRate       = get_hp("learningRate", 0.01),
+            validationRatio    = get_hp("validationRatio", 0.0),
+            maxEpochsVal       = get_hp("maxEpochsVal", 20),
+            transferFunctions  = get_hp("transferFunctions", fill(σ, length(topology))),
+            minLoss            = get_hp("minLoss", 0.0)
         )
     end
 
@@ -710,7 +712,7 @@ function modelCrossValidation(modelType::Symbol, modelHyperparameters::Dict, dat
 
     # Preparación de las salidas deseadas y clases
     targets_str = string.(targets)
-    classes = unique(targets_str)
+    classes = sort(unique(targets_str))
     num_classes = length(classes)
     num_folds = maximum(crossValidationIndices)
 
