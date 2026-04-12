@@ -74,7 +74,7 @@ println("\nIniciando Validación Cruzada con KNN...")
 hyper_knn = Dict("n_neighbors" => 3)
 resultados_knn = modelCrossValidation(:KNeighborsClassifier, hyper_knn, (inputs, targets), indices_cv)
 
-println("\n✅ ¡Validación Cruzada Terminada!")
+println("\n ¡Validación Cruzada Terminada!")
 println("==================================================")
 println("Resultados (Media, Desviación Típica):")
 println("1. Precisión (Accuracy): ", resultados_knn[1])
