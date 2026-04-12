@@ -43,7 +43,8 @@ function load_simpsons_binary(flanders_folder::String, apu_folder::String, img_s
     shuffle!(flanders_inputs)
     shuffle!(apu_inputs)
     
-    # Recortamos ambos arrays para que tengan exactamente el mismo tamaño (307)
+    # Recortamos ambos arrays para que tengan exactamente el mismo tamaño (en cas de añadir más imágenes
+    # a alguna de las carpetas en el futuro)
     flanders_inputs = flanders_inputs[1:min_imgs]
     apu_inputs = apu_inputs[1:min_imgs]
     
@@ -74,7 +75,7 @@ println("\nIniciando Validación Cruzada con KNN...")
 hyper_knn = Dict("n_neighbors" => 3)
 resultados_knn = modelCrossValidation(:KNeighborsClassifier, hyper_knn, (inputs, targets), indices_cv)
 
-println("\n ¡Validación Cruzada Terminada!")
+println("\n¡Validación Cruzada Terminada!")
 println("==================================================")
 println("Resultados (Media, Desviación Típica):")
 println("1. Precisión (Accuracy): ", resultados_knn[1])
